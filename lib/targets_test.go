@@ -309,7 +309,12 @@ func TestNewHTTPTargeter(t *testing.T) {
 		@`, bodyf.Name(),
 		`
 
-		SUBSCRIBE http://foobar.org/sub`,
+		SUBSCRIBE http://foobar.org/sub
+
+		# This is a comment. Lines starting with hash pound are ignored.
+		GET http://:6060/
+		X-Header: 1
+		X-Header: 2`,
 	)
 
 	src := bytes.NewBufferString(strings.TrimSpace(targets))
@@ -359,6 +364,15 @@ func TestNewHTTPTargeter(t *testing.T) {
 			URL:    "http://foobar.org/sub",
 			Body:   []byte{},
 			Header: http.Header{"Content-Type": []string{"text/plain"}},
+		},
+		{ // Preceeding comment is ignored and target is parsed correctly.
+			Method: "GET",
+			URL:    "http://:6060/",
+			Body:   []byte{},
+			Header: http.Header{
+				"X-Header":     []string{"1", "2"},
+				"Content-Type": []string{"text/plain"},
+			},
 		},
 	} {
 		var got Target

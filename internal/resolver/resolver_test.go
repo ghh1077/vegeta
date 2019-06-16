@@ -58,14 +58,11 @@ func TestResolver(t *testing.T) {
 	done := make(chan struct{})
 
 	ds := dns.Server{
-		Addr:         "127.0.0.1:0",
-		Net:          "udp",
-		UDPSize:      dns.MinMsgSize,
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 2 * time.Second,
-		// Unsafe instructs the server to disregard any sanity checks and directly hand the message to
-		// the handler. It will specifically not check if the query has the QR bit not set.
-		Unsafe:            false,
+		Addr:              "127.0.0.1:0",
+		Net:               "udp",
+		UDPSize:           dns.MinMsgSize,
+		ReadTimeout:       2 * time.Second,
+		WriteTimeout:      2 * time.Second,
 		NotifyStartedFunc: func() { close(done) },
 	}
 
@@ -85,8 +82,7 @@ func TestResolver(t *testing.T) {
 
 	res, err := NewResolver([]string{ds.PacketConn.LocalAddr().String()})
 	if err != nil {
-		t.Errorf("error from NewResolver: %s", err)
-		return
+		t.Fatalf("error from NewResolver: %s", err)
 	}
 	net.DefaultResolver = res
 
@@ -99,19 +95,16 @@ func TestResolver(t *testing.T) {
 
 	_, hport, err := net.SplitHostPort(tsurl.Host)
 	if err != nil {
-		t.Errorf("could not parse port from httptest url %s: %s", ts.URL, err)
-		return
+		t.Fatalf("could not parse port from httptest url %s: %s", ts.URL, err)
 	}
 	tsurl.Host = net.JoinHostPort(fakeDomain, hport)
 	resp, err := http.Get(tsurl.String())
 	if err != nil {
-		t.Errorf("failed resolver round trip: %s", err)
-		return
+		t.Fatalf("failed resolver round trip: %s", err)
 	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		t.Errorf("failed to read respose body")
-		return
+		t.Fatalf("failed to read respose body")
 	}
 	if strings.TrimSpace(string(body)) != payload {
 		t.Errorf("body mismatch, got: '%s', expected: '%s'", body, payload)
