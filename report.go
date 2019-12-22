@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	vegeta "github.com/tsenart/vegeta/lib"
@@ -20,7 +21,7 @@ Arguments:
           the supported encodings (gob | json | csv) [default: stdin]
 
 Options:
-  --type    Which report type to generate (text | json | hist[buckets]).
+  --type    Which report type to generate (text | json | hist[buckets] | hdrplot).
             [default: text]
 
   --every   Write the report to --output at every given interval (e.g 100ms)
@@ -37,9 +38,10 @@ Examples:
 
 func reportCmd() command {
 	fs := flag.NewFlagSet("vegeta report", flag.ExitOnError)
-	typ := fs.String("type", "text", "Report type to generate [text, json, hist[buckets]]")
+	typ := fs.String("type", "text", "Report type to generate [text, json, hist[buckets], hdrplot]")
 	every := fs.Duration("every", 0, "Report interval")
 	output := fs.String("output", "stdout", "Output file")
+	buckets := fs.String("buckets", "", "Histogram buckets, e.g.: \"[0,1ms,10ms]\"")
 
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, reportUsage)
@@ -51,11 +53,11 @@ func reportCmd() command {
 		if len(files) == 0 {
 			files = append(files, "stdin")
 		}
-		return report(files, *typ, *output, *every)
+		return report(files, *typ, *output, *every, *buckets)
 	}}
 }
 
-func report(files []string, typ, output string, every time.Duration) error {
+func report(files []string, typ, output string, every time.Duration, bucketsStr string) error {
 	if len(typ) < 4 {
 		return fmt.Errorf("invalid report type: %s", typ)
 	}
@@ -77,7 +79,7 @@ func report(files []string, typ, output string, every time.Duration) error {
 		report vegeta.Report
 	)
 
-	switch typ[:4] {
+	switch typ {
 	case "plot":
 		return fmt.Errorf("The plot reporter has been deprecated and succeeded by the vegeta plot command")
 	case "text":
@@ -85,18 +87,33 @@ func report(files []string, typ, output string, every time.Duration) error {
 		rep, report = vegeta.NewTextReporter(&m), &m
 	case "json":
 		var m vegeta.Metrics
+		if bucketsStr != "" {
+			m.Histogram = &vegeta.Histogram{}
+			if err := m.Histogram.Buckets.UnmarshalText([]byte(bucketsStr)); err != nil {
+				return err
+			}
+		}
 		rep, report = vegeta.NewJSONReporter(&m), &m
-	case "hist":
-		if len(typ) < 6 {
-			return fmt.Errorf("bad buckets: '%s'", typ[4:])
-		}
-		var hist vegeta.Histogram
-		if err := hist.Buckets.UnmarshalText([]byte(typ[4:])); err != nil {
-			return err
-		}
-		rep, report = vegeta.NewHistogramReporter(&hist), &hist
+	case "hdrplot":
+		var m vegeta.Metrics
+		rep, report = vegeta.NewHDRHistogramPlotReporter(&m), &m
 	default:
-		return fmt.Errorf("unknown report type: %q", typ)
+		switch {
+		case strings.HasPrefix(typ, "hist"):
+			var hist vegeta.Histogram
+			if bucketsStr == "" { // Old way
+				if len(typ) < 6 {
+					return fmt.Errorf("bad buckets: '%s'", typ[4:])
+				}
+				bucketsStr = typ[4:]
+			}
+			if err := hist.Buckets.UnmarshalText([]byte(bucketsStr)); err != nil {
+				return err
+			}
+			rep, report = vegeta.NewHistogramReporter(&hist), &hist
+		default:
+			return fmt.Errorf("unknown report type: %q", typ)
+		}
 	}
 
 	sigch := make(chan os.Signal, 1)

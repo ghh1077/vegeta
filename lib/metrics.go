@@ -12,11 +12,13 @@ import (
 type Metrics struct {
 	// Latencies holds computed request latency metrics.
 	Latencies LatencyMetrics `json:"latencies"`
+	// Histogram, only if requested
+	Histogram *Histogram `json:"buckets,omitempty"`
 	// BytesIn holds computed incoming byte metrics.
 	BytesIn ByteMetrics `json:"bytes_in"`
 	// BytesOut holds computed outgoing byte metrics.
 	BytesOut ByteMetrics `json:"bytes_out"`
-	// First is the earliest timestamp in a Result set.
+	// Earliest is the earliest timestamp in a Result set.
 	Earliest time.Time `json:"earliest"`
 	// Latest is the latest timestamp in a Result set.
 	Latest time.Time `json:"latest"`
@@ -28,8 +30,10 @@ type Metrics struct {
 	Wait time.Duration `json:"wait"`
 	// Requests is the total number of requests executed.
 	Requests uint64 `json:"requests"`
-	// Rate is the rate of requests per second.
+	// Rate is the rate of sent requests per second.
 	Rate float64 `json:"rate"`
+	// Throughput is the rate of successful requests per second.
+	Throughput float64 `json:"throughput"`
 	// Success is the percentage of non-error responses.
 	Success float64 `json:"success"`
 	// StatusCodes is a histogram of the responses' status codes.
@@ -75,6 +79,10 @@ func (m *Metrics) Add(r *Result) {
 			m.Errors = append(m.Errors, r.Error)
 		}
 	}
+
+	if m.Histogram != nil {
+		m.Histogram.Add(r)
+	}
 }
 
 // Close implements the Close method of the Report interface by computing
@@ -82,16 +90,21 @@ func (m *Metrics) Add(r *Result) {
 func (m *Metrics) Close() {
 	m.init()
 	m.Rate = float64(m.Requests)
+	m.Throughput = float64(m.success)
 	m.Duration = m.Latest.Sub(m.Earliest)
+	m.Wait = m.End.Sub(m.Latest)
 	if secs := m.Duration.Seconds(); secs > 0 {
 		m.Rate /= secs
+		// No need to check for zero because we know m.Duration > 0
+		m.Throughput /= (m.Duration + m.Wait).Seconds()
 	}
-	m.Wait = m.End.Sub(m.Latest)
+
 	m.BytesIn.Mean = float64(m.BytesIn.Total) / float64(m.Requests)
 	m.BytesOut.Mean = float64(m.BytesOut.Total) / float64(m.Requests)
 	m.Success = float64(m.success) / float64(m.Requests)
 	m.Latencies.Mean = time.Duration(float64(m.Latencies.Total) / float64(m.Requests))
 	m.Latencies.P50 = m.Latencies.Quantile(0.50)
+	m.Latencies.P90 = m.Latencies.Quantile(0.90)
 	m.Latencies.P95 = m.Latencies.Quantile(0.95)
 	m.Latencies.P99 = m.Latencies.Quantile(0.99)
 }
@@ -118,6 +131,8 @@ type LatencyMetrics struct {
 	Mean time.Duration `json:"mean"`
 	// P50 is the 50th percentile request latency.
 	P50 time.Duration `json:"50th"`
+	// P90 is the 90th percentile request latency.
+	P90 time.Duration `json:"90th"`
 	// P95 is the 95th percentile request latency.
 	P95 time.Duration `json:"95th"`
 	// P99 is the 99th percentile request latency.

@@ -43,6 +43,7 @@ func TestMetrics_Add(t *testing.T) {
 			Total:     duration("50.005s"),
 			Mean:      duration("5.0005ms"),
 			P50:       duration("5.0005ms"),
+			P90:       duration("9.0005ms"),
 			P95:       duration("9.5005ms"),
 			P99:       duration("9.9005ms"),
 			Max:       duration("10ms"),
@@ -57,6 +58,7 @@ func TestMetrics_Add(t *testing.T) {
 		Wait:        duration("10ms"),
 		Requests:    10000,
 		Rate:        1.000100010001,
+		Throughput:  0.6667660098349737,
 		Success:     0.6667,
 		StatusCodes: map[string]int{"500": 3333, "200": 3334, "302": 3333},
 		Errors:      []string{"Internal server error"},
@@ -113,11 +115,13 @@ func BenchmarkMetrics(b *testing.B) {
 	}{
 		{"streadway/quantile", streadway.New(
 			streadway.Known(0.50, 0.01),
+			streadway.Known(0.90, 0.005),
 			streadway.Known(0.95, 0.001),
 			streadway.Known(0.99, 0.0005),
 		)},
 		{"bmizerany/perks/quantile", newBmizeranyEstimator(
 			0.50,
+			0.90,
 			0.95,
 			0.99,
 		)},

@@ -1,4 +1,4 @@
-# Vegeta [![Build Status](https://secure.travis-ci.org/tsenart/vegeta.svg?branch=master)](http://travis-ci.org/tsenart/vegeta) [![Go Report Card](https://goreportcard.com/badge/github.com/tsenart/vegeta)](https://goreportcard.com/report/github.com/tsenart/vegeta) [![GoDoc](https://godoc.org/github.com/tsenart/vegeta?status.svg)](https://godoc.org/github.com/tsenart/vegeta) [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/tsenart/vegeta?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge) [![Donate](https://img.shields.io/badge/donate-bitcoin-yellow.svg)](#donate)
+# Vegeta [![Build Status](https://secure.travis-ci.org/tsenart/vegeta.svg?branch=master)](http://travis-ci.org/tsenart/vegeta) [![Fuzzit Status](https://app.fuzzit.dev/badge?org_id=vegeta)](https://app.fuzzit.dev/orgs/vegeta/dashboard) [![Go Report Card](https://goreportcard.com/badge/github.com/tsenart/vegeta)](https://goreportcard.com/report/github.com/tsenart/vegeta) [![GoDoc](https://godoc.org/github.com/tsenart/vegeta?status.svg)](https://godoc.org/github.com/tsenart/vegeta) [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/tsenart/vegeta?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge) [![Donate](https://img.shields.io/badge/donate-bitcoin-yellow.svg)](#donate)
 
 Vegeta is a versatile HTTP load testing tool built out of a need to drill
 HTTP services with a constant request rate.
@@ -62,6 +62,8 @@ attack command:
     	Requests body file
   -cert string
     	TLS client PEM encoded certificate file
+  -chunked
+    	Send body with chunked transfer encoding
   -connections int
     	Max open idle connections per target host (default 10000)
   -duration duration
@@ -86,12 +88,16 @@ attack command:
     	Read targets lazily
   -max-body value
     	Maximum number of bytes to capture from response bodies. [-1 = no limit] (default -1)
+  -max-workers uint
+    	Maximum number of workers (default 18446744073709551615)
   -name string
     	Attack name
   -output string
     	Output file (default "stdout")
+  -proxy-header value
+    	Proxy CONNECT header
   -rate value
-    	Number of requests per time unit (default 50/1s)
+    	Number of requests per time unit [0 = infinity] (default 50/1s)
   -redirects int
     	Number of redirects to follow. -1 will not follow but marks as success (default 10)
   -resolvers value
@@ -106,8 +112,6 @@ attack command:
     	Connect over a unix socket. This overrides the host address in target URLs
   -workers uint
     	Initial number of workers (default 10)
-
-
 
 encode command:
   -output string
@@ -124,12 +128,14 @@ plot command:
     	Title and header of the resulting HTML page (default "Vegeta Plot")
 
 report command:
+  -buckets string
+    	Histogram buckets, e.g.: "[0,1ms,10ms]"
   -every duration
     	Report interval
   -output string
     	Output file (default "stdout")
   -type string
-    	Report type to generate [text, json, hist[buckets]] (default "text")
+    	Report type to generate [text, json, hist[buckets], hdrplot] (default "text")
 
 examples:
   echo "GET http://localhost/" | vegeta attack -duration=5s | tee results.bin | vegeta report
@@ -163,6 +169,10 @@ request unless overridden per attack target, see `-targets`.
 
 Specifies the PEM encoded TLS client certificate file to be used with HTTPS requests.
 If `-key` isn't specified, it will be set to the value of this flag.
+
+#### `-chunked`
+
+Specifies whether to send request bodies with the chunked transfer encoding.
 
 #### `-connections`
 
@@ -240,13 +250,15 @@ X-Account-ID: 99
 @/path/to/newthing.json
 ```
 
-###### Add comments to the targets
+###### Add comments
 
 Lines starting with `#` are ignored.
 
 ```
 # get a dragon ball
 GET http://goku:9090/path/to/dragon?item=ball
+# specify a test accout
+X-Account-ID: 99
 ```
 
 #### `-h2c`
@@ -316,6 +328,13 @@ the targets. The actual request rate can vary slightly due to things like
 garbage collection, but overall it should stay very close to the specified.
 If no time unit is provided, 1s is used.
 
+A `-rate` of `0` or `infinity` means vegeta will send requests as fast as possible.
+Use together with `-max-workers` to model a fixed set of concurrent users sending
+requests serially (i.e. waiting for a response before sending the next request).
+
+Setting `-max-workers` to a very high number while setting `-rate=0` can result in
+vegeta consuming too many resources and crashing. Use with care.
+
 #### `-redirects`
 
 Specifies the max number of redirects followed on each request. The
@@ -346,7 +365,12 @@ timeouts.
 
 Specifies the initial number of workers used in the attack. The actual
 number of workers will increase if necessary in order to sustain the
-requested rate.
+requested rate, unless it'd go beyond `-max-workers`.
+
+#### `-max-workers`
+
+Specifies the maximum number of workers used in the attack. It can be used to
+control the concurrency level used by an attack.
 
 ### `report` command
 
@@ -360,8 +384,10 @@ Arguments:
           the supported encodings (gob | json | csv) [default: stdin]
 
 Options:
-  --type    Which report type to generate (text | json | hist[buckets]).
+  --type    Which report type to generate (text | json | hist[buckets] | hdrplot).
             [default: text]
+
+  --buckets Histogram buckets, e.g.: '[0,1ms,10ms]'
 
   --every   Write the report to --output at every given interval (e.g 100ms)
             The default of 0 means the report will only be written after
@@ -378,7 +404,7 @@ Examples:
 #### `report -type=text`
 
 ```console
-Requests      [total, rate]             1200, 120.00
+Requests      [total, rate, throughput] 1200, 120.00, 65.87
 Duration      [total, attack, wait]     10.094965987s, 9.949883921s, 145.082066ms
 Latencies     [mean, 50, 95, 99, max]   113.172398ms, 108.272568ms, 140.18235ms, 247.771566ms, 264.815246ms
 Bytes In      [total, mean]             3714690, 3095.57
@@ -397,7 +423,8 @@ Get http://localhost:6060: http: can't write HTTP request on broken connection
 The `Requests` row shows:
 
 - The `total` number of issued requests.
-- The real request `rate` sustained during the attack.
+- The real request `rate` sustained during the `attack` period.
+- The `throughput` of successful requests over the `total` period.
 
 The `Duration` row shows:
 
@@ -408,7 +435,7 @@ The `Duration` row shows:
 Latency is the amount of time taken for a response to a request to be read (including the `-max-body` bytes from the response body).
 
 - `mean` is the [arithmetic mean / average](https://en.wikipedia.org/wiki/Arithmetic_mean) of the latencies of all requests in an attack.
-- `50`, `95`, `99` are the 50th, 95th an 99th [percentiles](https://en.wikipedia.org/wiki/Percentile), respectively, of the latencies of all requests in an attack. To understand more about why these are useful, I recommend [this article](https://bravenewgeek.com/everything-you-know-about-latency-is-wrong/) from @tylertreat.
+- `50`, `90`, `95`, `99` are the 50th, 90th, 95th and 99th [percentiles](https://en.wikipedia.org/wiki/Percentile), respectively, of the latencies of all requests in an attack. To understand more about why these are useful, I recommend [this article](https://bravenewgeek.com/everything-you-know-about-latency-is-wrong/) from @tylertreat.
 - `max` is the maximum latency of all requests in an attack.
 
 The `Bytes In` and `Bytes Out` rows shows:
@@ -424,16 +451,20 @@ The `Error Set` shows a unique set of errors returned by all issued requests. Th
 
 #### `report -type=json`
 
+All duration like fields are in nanoseconds.
+
 ```json
 {
   "latencies": {
     "total": 237119463,
     "mean": 2371194,
     "50th": 2854306,
+    "90th": 3228223,
     "95th": 3478629,
     "99th": 3530000,
     "max": 3660505
   },
+  "buckets": {"0":9952,"1000000":40,"2000000":6,"3000000":0,"4000000":0,"5000000":2},
   "bytes_in": {
     "total": 606700,
     "mean": 6067
@@ -449,6 +480,7 @@ The `Error Set` shows a unique set of errors returned by all issued requests. Th
   "wait": 3507222,
   "requests": 100,
   "rate": 101.01010672380401,
+  "throughput": 101.00012489812,
   "success": 1,
   "status_codes": {
     "200": 100
@@ -456,6 +488,13 @@ The `Error Set` shows a unique set of errors returned by all issued requests. Th
   "errors": []
 }
 ```
+
+In the `buckets` field, each key is a nanosecond value representing the lower bound of a bucket.
+The upper bound is implied by the next higher bucket.
+Upper bounds are non-inclusive.
+The highest bucket is the overflow bucket; it has no upper bound.
+The values are counts of how many requests fell into that particular bucket.
+If the `-buckets` parameter is not present, the `buckets` field is omitted.
 
 #### `report -type=hist`
 
@@ -469,6 +508,108 @@ Bucket         #     %       Histogram
 [2ms,   4ms]   5505  29.92%  ######################
 [4ms,   6ms]   2117  11.51%  ########
 [6ms,   +Inf]  4771  25.93%  ###################
+```
+
+#### `report -type=hdrplot`
+
+Writes out results in a format plottable by https://hdrhistogram.github.io/HdrHistogram/plotFiles.html.
+
+```
+Value(ms)  Percentile  TotalCount  1/(1-Percentile)
+0.076715   0.000000    0           1.000000
+0.439370   0.100000    200         1.111111
+0.480836   0.200000    400         1.250000
+0.495559   0.300000    599         1.428571
+0.505101   0.400000    799         1.666667
+0.513059   0.500000    999         2.000000
+0.516664   0.550000    1099        2.222222
+0.520455   0.600000    1199        2.500000
+0.525008   0.650000    1299        2.857143
+0.530174   0.700000    1399        3.333333
+0.534891   0.750000    1499        4.000000
+0.537572   0.775000    1548        4.444444
+0.540340   0.800000    1598        5.000000
+0.543763   0.825000    1648        5.714286
+0.547164   0.850000    1698        6.666667
+0.551432   0.875000    1748        8.000000
+0.553444   0.887500    1773        8.888889
+0.555774   0.900000    1798        10.000000
+0.558454   0.912500    1823        11.428571
+0.562123   0.925000    1848        13.333333
+0.565563   0.937500    1873        16.000000
+0.567831   0.943750    1886        17.777778
+0.570617   0.950000    1898        20.000000
+0.574522   0.956250    1911        22.857143
+0.579046   0.962500    1923        26.666667
+0.584426   0.968750    1936        32.000000
+0.586695   0.971875    1942        35.555556
+0.590451   0.975000    1948        40.000000
+0.597543   0.978125    1954        45.714286
+0.605637   0.981250    1961        53.333333
+0.613564   0.984375    1967        64.000000
+0.620393   0.985938    1970        71.113640
+0.629121   0.987500    1973        80.000000
+0.638060   0.989062    1976        91.424392
+0.648085   0.990625    1979        106.666667
+0.659689   0.992188    1982        128.008193
+0.665870   0.992969    1984        142.227279
+0.672985   0.993750    1986        160.000000
+0.680101   0.994531    1987        182.848784
+0.687810   0.995313    1989        213.356091
+0.695729   0.996094    1990        256.016385
+0.730641   0.996484    1991        284.414107
+0.785516   0.996875    1992        320.000000
+0.840392   0.997266    1993        365.764448
+1.009646   0.997656    1993        426.621160
+1.347020   0.998047    1994        512.032770
+1.515276   0.998242    1994        568.828214
+1.683532   0.998437    1995        639.795266
+1.887487   0.998633    1995        731.528895
+2.106249   0.998828    1996        853.242321
+2.325011   0.999023    1996        1023.541453
+2.434952   0.999121    1996        1137.656428
+2.544894   0.999219    1996        1280.409731
+2.589510   0.999316    1997        1461.988304
+2.605192   0.999414    1997        1706.484642
+2.620873   0.999512    1997        2049.180328
+2.628713   0.999561    1997        2277.904328
+2.636394   0.999609    1997        2557.544757
+2.644234   0.999658    1997        2923.976608
+2.652075   0.999707    1997        3412.969283
+2.658916   0.999756    1998        4098.360656
+2.658916   0.999780    1998        4545.454545
+2.658916   0.999805    1998        5128.205128
+2.658916   0.999829    1998        5847.953216
+2.658916   0.999854    1998        6849.315068
+2.658916   0.999878    1998        8196.721311
+2.658916   0.999890    1998        9090.909091
+2.658916   0.999902    1998        10204.081633
+2.658916   0.999915    1998        11764.705882
+2.658916   0.999927    1998        13698.630137
+2.658916   0.999939    1998        16393.442623
+2.658916   0.999945    1998        18181.818182
+2.658916   0.999951    1998        20408.163265
+2.658916   0.999957    1998        23255.813953
+2.658916   0.999963    1998        27027.027027
+2.658916   0.999969    1998        32258.064516
+2.658916   0.999973    1998        37037.037037
+2.658916   0.999976    1998        41666.666667
+2.658916   0.999979    1998        47619.047619
+2.658916   0.999982    1998        55555.555556
+2.658916   0.999985    1998        66666.666667
+2.658916   0.999986    1998        71428.571429
+2.658916   0.999988    1998        83333.333333
+2.658916   0.999989    1998        90909.090909
+2.658916   0.999991    1998        111111.111111
+2.658916   0.999992    1998        125000.000000
+2.658916   0.999993    1998        142857.142858
+2.658916   0.999994    1998        166666.666668
+2.658916   0.999995    1998        199999.999999
+2.658916   0.999996    1998        250000.000000
+2.658916   0.999997    1998        333333.333336
+2.658916   0.999998    1998        500000.000013
+2.658916   0.999999    1998        999999.999971
+2.658916   1.000000    1998        10000000.000000
 ```
 
 ### `encode` command
@@ -581,19 +722,12 @@ The `report` command accepts multiple result files.
 It'll read and sort them by timestamp before generating reports.
 
 ```console
-$ vegeta report 10.0.1.1.bin 10.0.2.1.bin 10.0.3.1.bin
-Requests      [total, rate]         3600000, 60000.00
-Latencies     [mean, 95, 99, max]   223.340085ms, 326.913687ms, 416.537743ms, 7.788103259s
-Bytes In      [total, mean]         3714690, 3095.57
-Bytes Out     [total, mean]         0, 0.00
-Success       [ratio]               100.0%
-Status Codes  [code:count]          200:3600000
-Error Set:
+vegeta report *.bin
 ```
 
 ## Usage: Real-time Analysis
 
-If you are a happy user of iTerm, you can integrate vegeta with [jplot](https://github.com/rs/jplot) using [jaggr](https://github.com/rs/jaggr) to plot a vegeta report in real-time in the comfort of you terminal:
+If you are a happy user of iTerm, you can integrate vegeta with [jplot](https://github.com/rs/jplot) using [jaggr](https://github.com/rs/jaggr) to plot a vegeta report in real-time in the comfort of your terminal:
 
 ```
 echo 'GET http://localhost:8080' | \
